@@ -119,7 +119,7 @@ test_owner_defaults_to_user_when_no_orgs() {
 
   make_stub_bin
   export GH_ORGS_MODE=none
-  set_fzf_queue "$tmp/fzf.queue" "$tmp/project"
+  set_fzf_queue "$tmp/fzf.queue" "$tmp/project" ""
   export GH_REPO_CREATE_LOG="$tmp/gh.log"
 
   (cd "$tmp" && bash "$SCRIPT")
@@ -149,10 +149,10 @@ test_owner_can_be_org() {
 
   export GH_REPO_CREATE_LOG="$log1"
 
-  set_fzf_queue "$tmp/fzf.queue1" "$tmp/project" "personal"
+  set_fzf_queue "$tmp/fzf.queue1" "$tmp/project" "personal" ""
   (cd "$tmp" && bash "$SCRIPT")
 
-  set_fzf_queue "$tmp/fzf.queue2" "$tmp/project" "organización" "org1"
+  set_fzf_queue "$tmp/fzf.queue2" "$tmp/project" "organización" "org1" ""
   export GH_REPO_CREATE_LOG="$log2"
   (cd "$tmp" && bash "$SCRIPT")
 
@@ -222,11 +222,14 @@ test_selecting_dot_requires_confirmation() {
   make_stub_bin
 
   export GH_ORGS_MODE=none
-  export FZF_OUT="."
   export GH_REPO_CREATE_LOG="$tmp/gh.log"
 
-  if (cd "$tmp/proj" && printf "n\n" | bash "$SCRIPT" >/dev/null 2>&1); then
-    fail "expected selecting '.' with 'n' to abort"
+  set_fzf_queue "$tmp/fzf.queue" "." ""
+
+  (cd "$tmp/proj" && printf "n\n" | bash "$SCRIPT" >/dev/null 2>&1)
+
+  if [[ -s "$GH_REPO_CREATE_LOG" ]]; then
+    fail "expected declining '.' to not create repo"
   fi
 }
 

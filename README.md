@@ -45,6 +45,8 @@ El flujo interactivo:
 3. Se crea el repositorio en GitHub y se agrega `origin`.
 4. Se hace el commit inicial y push a `main`.
 
+Al finalizar, el script vuelve a mostrar el selector de directorios para continuar con otro repositorio. Para salir, cancelá la selección (ESC/Ctrl-C) o no selecciones ningún directorio.
+
 ## Tests
 
 ```bash

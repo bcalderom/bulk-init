@@ -113,10 +113,9 @@ select_repo_owner() {
     return 0
   fi
 
-  choice=$(printf "personal\norganización\n" | fzf --prompt="¿Dónde crear el repositorio?: ")
+  choice=$(printf "personal\norganización\n" | fzf --prompt="¿Dónde crear el repositorio?: ") || true
   if [[ -z "$choice" ]]; then
-    log_error "No se seleccionó ningún owner. Abortando."
-    exit 1
+    return 1
   fi
 
   if [[ "$choice" == "personal" ]]; then
@@ -124,10 +123,9 @@ select_repo_owner() {
     return 0
   fi
 
-  org=$(printf "%s\n" "${ORGS[@]}" | fzf --prompt="Selecciona una organización: ")
+  org=$(printf "%s\n" "${ORGS[@]}" | fzf --prompt="Selecciona una organización: ") || true
   if [[ -z "$org" ]]; then
-    log_error "No se seleccionó ninguna organización. Abortando."
-    exit 1
+    return 1
   fi
 
   echo "$org"
@@ -196,50 +194,56 @@ main() {
     exit 1
   fi
 
-  log_info "Buscando directorios disponibles (excluyendo repositorios Git)..."
-  TARGET_DIR=$(find_non_git_dirs | fzf --prompt="Selecciona un directorio: ")
+  while true; do
+    log_info "Buscando directorios disponibles (excluyendo repositorios Git)..."
+    TARGET_DIR=$(find_non_git_dirs | fzf --prompt="Selecciona un directorio: ") || true
 
-  if [[ -z "$TARGET_DIR" ]]; then
-    log_error "No se seleccionó ningún directorio. Abortando."
-    exit 1
-  fi
-
-  if [[ "$TARGET_DIR" == "." ]]; then
-    read -r -p "Vas a inicializar y publicar el repositorio en el directorio actual ($PWD). ¿Continuar? [y/N]: " CONFIRM
-    if [[ "${CONFIRM:-}" != "y" && "${CONFIRM:-}" != "Y" ]]; then
-      log_error "Abortado por el usuario."
-      exit 1
+    if [[ -z "${TARGET_DIR:-}" ]]; then
+      log_info "No se seleccionó ningún directorio. Saliendo."
+      return 0
     fi
-  fi
 
-  if [[ "$TARGET_DIR" == "." ]]; then
-    REPO_NAME=$(basename "$PWD")
-  else
-    REPO_NAME=$(basename "$TARGET_DIR")
-  fi
+    if [[ "$TARGET_DIR" == "." ]]; then
+      read -r -p "Vas a inicializar y publicar el repositorio en el directorio actual ($PWD). ¿Continuar? [y/N]: " CONFIRM
+      if [[ "${CONFIRM:-}" != "y" && "${CONFIRM:-}" != "Y" ]]; then
+        log_error "Abortado por el usuario."
+        continue
+      fi
+    fi
 
-  OWNER=$(select_repo_owner)
+    if [[ "$TARGET_DIR" == "." ]]; then
+      REPO_NAME=$(basename "$PWD")
+    else
+      REPO_NAME=$(basename "$TARGET_DIR")
+    fi
 
-  log_info "Inicializando repositorio Git en: $TARGET_DIR"
-  git -C "$TARGET_DIR" init
+    OWNER=$(select_repo_owner) || true
+    if [[ -z "${OWNER:-}" ]]; then
+      log_error "No se seleccionó ningún owner. Abortando."
+      continue
+    fi
 
-  log_info "Creando repositorio en GitHub: $REPO_NAME"
-  gh repo create "$OWNER/$REPO_NAME" --source="$TARGET_DIR" --private --remote=origin
+    log_info "Inicializando repositorio Git en: $TARGET_DIR"
+    git -C "$TARGET_DIR" init
 
-  # Verifica si no hay archivos, crea README para commit inicial
-  if [[ -z "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' -print -quit 2>/dev/null)" ]]; then
-    echo "# $REPO_NAME" > "$TARGET_DIR/README.md"
-  fi
+    log_info "Creando repositorio en GitHub: $REPO_NAME"
+    gh repo create "$OWNER/$REPO_NAME" --source="$TARGET_DIR" --private --remote=origin
 
-  log_info "Realizando commit inicial..."
-  git -C "$TARGET_DIR" add .
-  git -C "$TARGET_DIR" commit -m "Initial commit"
+    # Verifica si no hay archivos, crea README para commit inicial
+    if [[ -z "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' -print -quit 2>/dev/null)" ]]; then
+      echo "# $REPO_NAME" > "$TARGET_DIR/README.md"
+    fi
 
-  log_info "Haciendo push a 'main'..."
-  git -C "$TARGET_DIR" branch -M main
-  git -C "$TARGET_DIR" push -u origin main
+    log_info "Realizando commit inicial..."
+    git -C "$TARGET_DIR" add .
+    git -C "$TARGET_DIR" commit -m "Initial commit"
 
-  log_info "Repositorio creado y publicado correctamente."
+    log_info "Haciendo push a 'main'..."
+    git -C "$TARGET_DIR" branch -M main
+    git -C "$TARGET_DIR" push -u origin main
+
+    log_info "Repositorio creado y publicado correctamente."
+  done
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

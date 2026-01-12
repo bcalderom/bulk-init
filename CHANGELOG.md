@@ -10,6 +10,7 @@
 ### Changed
 - La creación del repositorio en GitHub ahora usa `OWNER/REPO` según la selección del usuario (compatibilidad con versiones de `gh` sin `--owner`).
 - La creación del repositorio con `gh repo create` ya no usa flags no soportados por versiones antiguas (`--default-branch`, `--push`).
+- El modo interactivo vuelve a mostrar el selector de directorios al finalizar cada repositorio, permitiendo procesar varios en una sola ejecución.
 
 ### Fixed
 - En Arch Linux (y derivados), la sugerencia de instalación para el comando `gh` ahora usa el paquete correcto `github-cli`.
