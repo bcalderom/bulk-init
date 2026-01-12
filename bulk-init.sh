@@ -224,7 +224,7 @@ main() {
   git -C "$TARGET_DIR" init
 
   log_info "Creando repositorio en GitHub: $REPO_NAME"
-  gh repo create "$OWNER/$REPO_NAME" --source="$TARGET_DIR" --public --remote=origin
+  gh repo create "$OWNER/$REPO_NAME" --source="$TARGET_DIR" --private --remote=origin
 
   # Verifica si no hay archivos, crea README para commit inicial
   if [[ -z "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' -print -quit 2>/dev/null)" ]]; then

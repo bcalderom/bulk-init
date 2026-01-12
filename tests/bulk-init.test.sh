@@ -125,8 +125,13 @@ test_owner_defaults_to_user_when_no_orgs() {
   (cd "$tmp" && bash "$SCRIPT")
 
   grep -q -- "repo create myuser/project" "$GH_REPO_CREATE_LOG" || fail "expected repo to be created under myuser when no orgs"
-  grep -q -- "--default-branch" "$GH_REPO_CREATE_LOG" && fail "did not expect --default-branch flag"
-  grep -q -- "--push" "$GH_REPO_CREATE_LOG" && fail "did not expect --push flag"
+  if grep -q -- "--default-branch" "$GH_REPO_CREATE_LOG"; then
+    fail "did not expect --default-branch flag"
+  fi
+
+  if grep -q -- "--push" "$GH_REPO_CREATE_LOG"; then
+    fail "did not expect --push flag"
+  fi
 }
 
 test_owner_can_be_org() {

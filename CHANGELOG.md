@@ -9,10 +9,12 @@
 
 ### Changed
 - La creación del repositorio en GitHub ahora usa `OWNER/REPO` según la selección del usuario (compatibilidad con versiones de `gh` sin `--owner`).
+- La creación del repositorio con `gh repo create` ya no usa flags no soportados por versiones antiguas (`--default-branch`, `--push`).
 
 ### Fixed
 - En Arch Linux (y derivados), la sugerencia de instalación para el comando `gh` ahora usa el paquete correcto `github-cli`.
 - Seleccionar `.` (directorio actual) requiere confirmación explícita para evitar inicializar un repo dentro del directorio actual por accidente.
+- La creación del `README.md` inicial ahora detecta correctamente directorios vacíos (ignorando `.git`).
 ### Deprecated
 
 ### Removed
