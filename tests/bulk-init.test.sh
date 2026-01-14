@@ -52,7 +52,25 @@ if [[ "${1:-}" == "ssh-key" && "${2:-}" == "add" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "auth" && "${2:-}" == "logout" && "${3:-}" == "--help" ]]; then
+  if [[ "${GH_LOGOUT_SUPPORTS_YES:-}" == "1" ]]; then
+    echo "  --yes"
+  else
+    echo "  -h, --hostname"
+  fi
+  exit 0
+fi
+
 if [[ "${1:-}" == "auth" && "${2:-}" == "logout" ]]; then
+  if [[ "${GH_LOGOUT_SUPPORTS_YES:-}" != "1" ]]; then
+    for arg in "$@"; do
+      if [[ "$arg" == "--yes" ]]; then
+        echo "unsupported --yes" >&2
+        exit 2
+      fi
+    done
+  fi
+
   printf '%s ' "$@" > "${GH_LOGOUT_LOG:?GH_LOGOUT_LOG must be set}"
   echo >> "${GH_LOGOUT_LOG}"
   exit 0
@@ -275,14 +293,40 @@ test_windows_pipeline_skips_autoinstall_when_no_prompt() {
 
 test_logout_flag_calls_gh_auth_logout() {
   local tmp
+  local output
   tmp=$(with_temp_dir)
 
   make_stub_bin
 
-  export GH_LOGOUT_LOG="$tmp/gh.logout.log"
-  (cd "$tmp" && bash "$SCRIPT" --logout)
+  output=$(GH_LOGOUT_LOG="$tmp/gh.logout.log" GH_LOGOUT_SUPPORTS_YES=0 /bin/bash -c '
+    source tests/../bulk-init.sh
+    set +e
+    is_interactive() { return 0; }
+    main --logout
+  ' 2>&1)
 
-  grep -q -- "auth logout" "$GH_LOGOUT_LOG" || fail "expected gh auth logout to be called"
+  echo "$output" | grep -q -- "no soporta '--yes'" || fail "expected update warning for old gh"
+  grep -q -- "auth logout" "$tmp/gh.logout.log" || fail "expected gh auth logout to be called"
+  if grep -q -- "--yes" "$tmp/gh.logout.log"; then
+    fail "did not expect --yes with old gh"
+  fi
+}
+
+test_logout_flag_uses_yes_when_supported() {
+  local tmp
+  tmp=$(with_temp_dir)
+
+  make_stub_bin
+
+  GH_LOGOUT_LOG="$tmp/gh.logout.log" GH_LOGOUT_SUPPORTS_YES=1 /bin/bash -c '
+    source tests/../bulk-init.sh
+    set +e
+    is_interactive() { return 0; }
+    main --logout
+  ' >/dev/null 2>&1
+
+  grep -q -- "auth logout" "$tmp/gh.logout.log" || fail "expected gh auth logout to be called"
+  grep -q -- "--yes" "$tmp/gh.logout.log" || fail "expected --yes to be used when supported"
 }
 
 test_add_ssh_key_flag_calls_gh_ssh_key_add() {
@@ -339,6 +383,7 @@ run() {
   test_windows_pipeline_offers_and_runs_autoinstall
   test_windows_pipeline_skips_autoinstall_when_no_prompt
   test_logout_flag_calls_gh_auth_logout
+  test_logout_flag_uses_yes_when_supported
   test_add_ssh_key_flag_calls_gh_ssh_key_add
   test_help_flag_prints_usage
   test_selecting_dot_requires_confirmation

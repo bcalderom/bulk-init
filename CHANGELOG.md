@@ -18,6 +18,7 @@
 ### Fixed
 - En Arch Linux (y derivados), la sugerencia de instalación para el comando `gh` ahora usa el paquete correcto `github-cli`.
 - En Windows (Git Bash), la detección de sistema ya no falla al no existir `/etc/os-release`.
+- `--logout` ahora funciona con versiones de `gh` sin el flag `--yes` y sugiere actualizar GitHub CLI.
 - Seleccionar `.` (directorio actual) requiere confirmación explícita para evitar inicializar un repo dentro del directorio actual por accidente.
 - La creación del `README.md` inicial ahora detecta correctamente directorios vacíos (ignorando `.git`).
 

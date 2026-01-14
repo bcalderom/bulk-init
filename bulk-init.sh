@@ -44,6 +44,10 @@ join_by() {
   echo "$*"
 }
 
+gh_logout_supports_yes() {
+  gh auth logout --help 2>/dev/null | grep -q -- "--yes"
+}
+
 maybe_auto_install_windows() {
   if ! windows_has_winget; then
     return 1
@@ -272,7 +276,22 @@ main() {
 
   if (( $# > 0 )) && [[ "${1:-}" == "--logout" ]]; then
     check_dependencies gh
-    gh auth logout --hostname "${GH_HOST:-github.com}" --yes
+
+    if gh_logout_supports_yes; then
+      gh auth logout --hostname "${GH_HOST:-github.com}" --yes
+      log_info "Sesión de GitHub CLI cerrada correctamente."
+      return 0
+    fi
+
+    log_info "Tu versión de GitHub CLI no soporta '--yes' en 'gh auth logout'."
+    log_info "Recomendamos actualizar GitHub CLI para evitar prompts interactivos."
+
+    if [[ -n "${BULK_INIT_NO_PROMPT:-}" ]] || ! is_interactive; then
+      log_error "No se puede cerrar sesión sin interacción en esta versión de GitHub CLI."
+      exit 1
+    fi
+
+    gh auth logout --hostname "${GH_HOST:-github.com}"
     log_info "Sesión de GitHub CLI cerrada correctamente."
     return 0
   fi
