@@ -9,12 +9,30 @@ Script para inicializar un repositorio Git en un directorio existente y publicar
 - `gh` (GitHub CLI)
 - Autenticación previa en GitHub CLI (`gh auth login`)
 
+### Windows (Git Bash)
+
+Este proyecto es un script Bash. En Windows se ejecuta vía Git Bash (Git for Windows) y puede sugerir (y opcionalmente intentar) instalar dependencias con `winget`.
+
 ## Uso
 
 Ejecuta el script desde el directorio raíz donde querés buscar carpetas para inicializar.
 
+### Linux/macOS
+
 ```bash
 bash bulk-init.sh
+```
+
+### Windows (PowerShell)
+
+```powershell
+& "$env:ProgramFiles\Git\bin\bash.exe" ./bulk-init.sh
+```
+
+### Windows (CMD)
+
+```bat
+"%ProgramFiles%\Git\bin\bash.exe" bulk-init.sh
 ```
 
 Para desloguearte de GitHub CLI (eliminar el token almacenado), podés usar:
@@ -33,6 +51,30 @@ Para ver la ayuda:
 
 ```bash
 bash bulk-init.sh --help
+```
+
+### Instalación rápida de dependencias (Windows)
+
+Si estás en Windows (Git Bash) y falta `gh` y/o `fzf`, el script imprime el comando recomendado para PowerShell o CMD:
+
+```bat
+winget install --id GitHub.cli -e
+winget install --id junegunn.fzf -e
+```
+
+Si `winget` no está disponible, también muestra alternativas:
+
+```bat
+choco install gh fzf -y
+scoop install gh fzf
+```
+
+Además, si hay consola interactiva, te ofrece intentar la instalación automáticamente abriendo `cmd.exe` como administrador.
+
+Para desactivar prompts (por ejemplo en CI):
+
+```bash
+BULK_INIT_NO_PROMPT=1 bash bulk-init.sh
 ```
 
 El flujo interactivo:

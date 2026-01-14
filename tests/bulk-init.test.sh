@@ -95,6 +95,40 @@ EOF
   chmod +x "$STUB_BIN/gh"
 }
 
+make_stub_windows_shell() {
+  STUB_WIN=$(mktemp -d)
+  export STUB_WIN
+
+  cat > "$STUB_WIN/cmd.exe" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+# Simula cmd.exe lo suficiente para que `where winget` funcione.
+if [[ "${1:-}" == "/c" ]]; then
+  cmd="${2:-}"
+  case "$cmd" in
+    "where winget"*)
+      exit 0
+      ;;
+  esac
+fi
+
+exit 0
+EOF
+  chmod +x "$STUB_WIN/cmd.exe"
+
+  cat > "$STUB_WIN/powershell.exe" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+: "${POWERSHELL_LOG:?POWERSHELL_LOG must be set}"
+printf '%s ' "$@" >> "$POWERSHELL_LOG"
+echo >> "$POWERSHELL_LOG"
+exit 0
+EOF
+  chmod +x "$STUB_WIN/powershell.exe"
+}
+
 with_temp_dir() {
   local dir
   dir=$(mktemp -d)
@@ -175,6 +209,70 @@ test_arch_install_suggests_github_cli() {
   echo "$output" | grep -q -- "sudo pacman -S github-cli" || fail "expected pacman suggestion to use github-cli"
 }
 
+test_windows_install_suggests_winget() {
+  local output
+  output=$(bash -c 'source tests/../bulk-init.sh; OS_ID=windows; MISSING_TOOLS=(gh fzf); suggest_install' 2>&1)
+  echo "$output" | grep -q -- "winget install --id GitHub.cli -e" || fail "expected winget suggestion for GitHub CLI"
+  echo "$output" | grep -q -- "winget install --id junegunn.fzf -e" || fail "expected winget suggestion for fzf"
+}
+
+test_windows_pipeline_offers_and_runs_autoinstall() {
+  local tmp
+  local output
+  tmp=$(with_temp_dir)
+
+  make_stub_windows_shell
+
+  export POWERSHELL_LOG="$tmp/powershell.log"
+
+  output=$(PATH="$STUB_WIN" POWERSHELL_LOG="$POWERSHELL_LOG" /bin/bash -c '
+    source tests/../bulk-init.sh
+    set +e
+    detect_os() { OS_ID=windows; }
+    is_interactive() { return 0; }
+
+    (check_dependencies gh fzf)
+    echo "__EXIT__$?"
+  ' <<<"y" 2>&1)
+
+  echo "$output" | grep -q -- "winget install --id GitHub.cli -e" || fail "expected winget suggestion for GitHub CLI in pipeline"
+  echo "$output" | grep -q -- "winget install --id junegunn.fzf -e" || fail "expected winget suggestion for fzf in pipeline"
+  echo "$output" | grep -q -- "__EXIT__1" || fail "expected check_dependencies to exit non-zero when tools are still missing"
+
+  [[ -f "$POWERSHELL_LOG" ]] || fail "expected powershell.exe to be invoked for elevated install"
+  grep -q -- "Start-Process cmd.exe -Verb RunAs" "$POWERSHELL_LOG" || fail "expected elevated cmd.exe invocation"
+  grep -q -- "winget install --id GitHub.cli -e" "$POWERSHELL_LOG" || fail "expected winget GitHub.cli command"
+  grep -q -- "winget install --id junegunn.fzf -e" "$POWERSHELL_LOG" || fail "expected winget junegunn.fzf command"
+}
+
+test_windows_pipeline_skips_autoinstall_when_no_prompt() {
+  local tmp
+  local output
+  tmp=$(with_temp_dir)
+
+  make_stub_windows_shell
+
+  export POWERSHELL_LOG="$tmp/powershell.log"
+
+  output=$(PATH="$STUB_WIN" POWERSHELL_LOG="$POWERSHELL_LOG" BULK_INIT_NO_PROMPT=1 /bin/bash -c '
+    source tests/../bulk-init.sh
+    set +e
+    detect_os() { OS_ID=windows; }
+    is_interactive() { return 0; }
+
+    (check_dependencies gh fzf)
+    echo "__EXIT__$?"
+  ' <<<"y" 2>&1)
+
+  echo "$output" | grep -q -- "winget install --id GitHub.cli -e" || fail "expected winget suggestion for GitHub CLI when no-prompt"
+  echo "$output" | grep -q -- "winget install --id junegunn.fzf -e" || fail "expected winget suggestion for fzf when no-prompt"
+  echo "$output" | grep -q -- "__EXIT__1" || fail "expected check_dependencies to exit non-zero when tools are missing"
+
+  if [[ -s "$POWERSHELL_LOG" ]]; then
+    fail "did not expect powershell.exe to be invoked when BULK_INIT_NO_PROMPT=1"
+  fi
+}
+
 test_logout_flag_calls_gh_auth_logout() {
   local tmp
   tmp=$(with_temp_dir)
@@ -237,6 +335,9 @@ run() {
   test_owner_defaults_to_user_when_no_orgs
   test_owner_can_be_org
   test_arch_install_suggests_github_cli
+  test_windows_install_suggests_winget
+  test_windows_pipeline_offers_and_runs_autoinstall
+  test_windows_pipeline_skips_autoinstall_when_no_prompt
   test_logout_flag_calls_gh_auth_logout
   test_add_ssh_key_flag_calls_gh_ssh_key_add
   test_help_flag_prints_usage

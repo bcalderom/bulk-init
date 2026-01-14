@@ -12,6 +12,70 @@ require_command() {
   fi
 }
 
+is_interactive() {
+  [[ -t 0 ]]
+}
+
+windows_has_winget() {
+  command -v cmd.exe &> /dev/null || return 1
+  cmd.exe /c "where winget" > /dev/null 2>&1
+}
+
+map_windows_winget_ids() {
+  WINDOWS_WINGET_IDS=()
+  for tool in "${MISSING_TOOLS[@]}"; do
+    case "$tool" in
+      gh)
+        WINDOWS_WINGET_IDS+=("GitHub.cli")
+        ;;
+      fzf)
+        WINDOWS_WINGET_IDS+=("junegunn.fzf")
+        ;;
+      git)
+        WINDOWS_WINGET_IDS+=("Git.Git")
+        ;;
+    esac
+  done
+}
+
+join_by() {
+  local IFS="$1"
+  shift
+  echo "$*"
+}
+
+maybe_auto_install_windows() {
+  if ! windows_has_winget; then
+    return 1
+  fi
+
+  if [[ -n "${BULK_INIT_NO_PROMPT:-}" ]] || ! is_interactive; then
+    return 1
+  fi
+
+  map_windows_winget_ids
+  if (( ${#WINDOWS_WINGET_IDS[@]} == 0 )); then
+    return 1
+  fi
+
+  local winget_commands=()
+  for winget_id in "${WINDOWS_WINGET_IDS[@]}"; do
+    winget_commands+=("winget install --id ${winget_id} -e")
+  done
+
+  local winget_cmd
+  winget_cmd=$(join_by " && " "${winget_commands[@]}")
+
+  read -r -p "¿Quieres intentar instalarlas ahora (se abrirá CMD como admin)? [y/N]: " CONFIRM_INSTALL
+  if [[ "${CONFIRM_INSTALL:-}" != "y" && "${CONFIRM_INSTALL:-}" != "Y" ]]; then
+    return 1
+  fi
+
+  log_info "Abriendo CMD como administrador para instalar dependencias..."
+  powershell.exe -NoProfile -Command "Start-Process cmd.exe -Verb RunAs -ArgumentList '/c', '${winget_cmd}'"
+  return 0
+}
+
 print_help() {
   cat <<'EOF'
 Uso:
@@ -41,10 +105,21 @@ detect_os() {
   if [[ -f /etc/os-release ]]; then
     . /etc/os-release
     OS_ID=$ID
-  else
-    log_error "No se pudo detectar el sistema operativo."
-    exit 1
+    return 0
   fi
+
+  local uname_out
+  uname_out=$(uname -s 2>/dev/null || true)
+  case "$uname_out" in
+    MINGW*|MSYS*|CYGWIN*)
+      OS_ID=windows
+      return 0
+      ;;
+    *)
+      log_error "No se pudo detectar el sistema operativo."
+      exit 1
+      ;;
+  esac
 }
 
 suggest_install() {
@@ -69,6 +144,21 @@ suggest_install() {
 
       echo "  sudo pacman -S ${INSTALL_PACKAGES[*]}"
       ;;
+    windows)
+      log_info "Puedes instalar las herramientas faltantes en PowerShell o CMD con:"
+      map_windows_winget_ids
+      if (( ${#WINDOWS_WINGET_IDS[@]} > 0 )); then
+        for winget_id in "${WINDOWS_WINGET_IDS[@]}"; do
+          echo "  winget install --id ${winget_id} -e"
+        done
+      fi
+
+      if ! windows_has_winget; then
+        log_info "No se detectó winget. Alternativas:"
+        echo "  choco install gh fzf -y"
+        echo "  scoop install gh fzf"
+      fi
+      ;;
     *)
       log_info "Sistema operativo no reconocido para sugerir instalación automática."
       ;;
@@ -87,6 +177,23 @@ check_dependencies() {
     log_error "Faltan herramientas necesarias: ${MISSING_TOOLS[*]}"
     detect_os
     suggest_install
+
+    if [[ "${OS_ID:-}" == "windows" ]]; then
+      if maybe_auto_install_windows; then
+        MISSING_TOOLS=()
+        for cmd in "$@"; do
+          require_command "$cmd"
+        done
+
+        if (( ${#MISSING_TOOLS[@]} == 0 )); then
+          return 0
+        fi
+
+        log_error "Las herramientas siguen faltando después de la instalación."
+        log_info "Puede que necesites abrir una nueva terminal para actualizar el PATH."
+      fi
+    fi
+
     exit 1
   fi
 }

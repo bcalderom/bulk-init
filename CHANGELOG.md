@@ -6,6 +6,9 @@
 - Flag `--logout` para cerrar sesión de GitHub CLI.
 - Flag `--add-ssh-key` para subir una llave SSH pública existente a GitHub.
 - Flag `-h`/`--help` para mostrar ayuda de uso.
+- Soporte de instalación en Windows (Git Bash): sugerencias de instalación con `winget` y alternativas (`choco`, `scoop`).
+- Instalación opcional automática en Windows: abre `cmd.exe` como admin y ejecuta `winget`.
+- Tests para simular el pipeline de instalación en Windows (stubs de `cmd.exe`/`powershell.exe`).
 
 ### Changed
 - La creación del repositorio en GitHub ahora usa `OWNER/REPO` según la selección del usuario (compatibilidad con versiones de `gh` sin `--owner`).
@@ -14,8 +17,10 @@
 
 ### Fixed
 - En Arch Linux (y derivados), la sugerencia de instalación para el comando `gh` ahora usa el paquete correcto `github-cli`.
+- En Windows (Git Bash), la detección de sistema ya no falla al no existir `/etc/os-release`.
 - Seleccionar `.` (directorio actual) requiere confirmación explícita para evitar inicializar un repo dentro del directorio actual por accidente.
 - La creación del `README.md` inicial ahora detecta correctamente directorios vacíos (ignorando `.git`).
+
 ### Deprecated
 
 ### Removed
