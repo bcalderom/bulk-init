@@ -16,10 +16,12 @@ There are no Cursor/Copilot rule files in this repo (no `.cursor/rules/`, no `.c
 
 ### Run
 - Run the tool: `bash bulk-init.sh`
+- Run from a specific root: `bash bulk-init.sh /path/to/root`
 - Show help: `bash bulk-init.sh --help`
 - Logout from `gh`: `bash bulk-init.sh --logout`
 - Add SSH key to GitHub: `bash bulk-init.sh --add-ssh-key`
-- Connect local dir to remote: `bash bulk-init.sh --connect-remote`
+- Connect local dir to remote: `bash bulk-init.sh --connect-remote /path/to/root`
+  - If the directory already has `.git` with an `origin` remote, the picker warns and reprompts; if it has `.git` without `origin`, it asks for confirmation.
 
 ---
 

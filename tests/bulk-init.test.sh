@@ -46,6 +46,7 @@ if [[ -n "$log_file" ]]; then
   echo >> "$log_file"
 fi
 
+
 case "${1:-}" in
   -C)
     shift 2
@@ -64,6 +65,9 @@ case "${1:-}" in
       if [[ "${GIT_REMOTE_EXISTS:-}" == "1" ]]; then
         echo "git@github.com:myuser/example.git"
         exit 0
+      fi
+      if [[ "${GIT_REMOTE_EXISTS:-}" == "0" ]]; then
+        exit 2
       fi
       exit 1
     fi
@@ -276,7 +280,7 @@ test_owner_defaults_to_user_when_no_orgs() {
   set_fzf_queue "$tmp/fzf.queue" "$tmp/project" ""
   export GH_REPO_CREATE_LOG="$tmp/gh.log"
 
-  (cd "$tmp" && bash "$SCRIPT")
+  (cd "$tmp" && bash "$SCRIPT" "$tmp")
 
   grep -q -- "repo create myuser/project" "$GH_REPO_CREATE_LOG" || fail "expected repo to be created under myuser when no orgs"
   if grep -q -- "--default-branch" "$GH_REPO_CREATE_LOG"; then
@@ -304,11 +308,11 @@ test_owner_can_be_org() {
   export GH_REPO_CREATE_LOG="$log1"
 
   set_fzf_queue "$tmp/fzf.queue1" "$tmp/project" "personal" ""
-  (cd "$tmp" && bash "$SCRIPT")
+  (cd "$tmp" && bash "$SCRIPT" "$tmp")
 
   set_fzf_queue "$tmp/fzf.queue2" "$tmp/project" "organización" "org1" ""
   export GH_REPO_CREATE_LOG="$log2"
-  (cd "$tmp" && bash "$SCRIPT")
+  (cd "$tmp" && bash "$SCRIPT" "$tmp")
 
   grep -q -- "repo create myuser/project" "$log1" || fail "expected repo to be created under myuser when selecting personal"
   grep -q -- "repo create org" "$log1" && fail "unexpected org selection when selecting personal"
@@ -444,7 +448,7 @@ test_add_ssh_key_flag_calls_gh_ssh_key_add() {
   set_fzf_queue "$tmp/fzf.queue" "$tmp/.ssh/id_ed25519.pub"
 
   export GH_SSH_KEY_ADD_LOG="$tmp/gh.ssh-key-add.log"
-  (cd "$tmp" && bash "$SCRIPT" --add-ssh-key)
+  (cd "$tmp" && bash "$SCRIPT" --add-ssh-key "$tmp")
 
   grep -q -- "ssh-key add" "$GH_SSH_KEY_ADD_LOG" || fail "expected gh ssh-key add to be called"
   grep -q -- "--title" "$GH_SSH_KEY_ADD_LOG" || fail "expected gh ssh-key add to be called with --title"
@@ -452,9 +456,10 @@ test_add_ssh_key_flag_calls_gh_ssh_key_add() {
 
 test_help_flag_prints_usage() {
   local tmp
+  local output
   tmp=$(with_temp_dir)
 
-  output=$(cd "$tmp" && bash "$SCRIPT" --help)
+  output=$(cd "$tmp" && bash "$SCRIPT" --help "$tmp")
   echo "$output" | grep -q -- "Uso:" || fail "expected help output to include 'Uso:'"
 }
 
@@ -470,7 +475,7 @@ test_selecting_dot_requires_confirmation() {
 
   set_fzf_queue "$tmp/fzf.queue" "." ""
 
-  (cd "$tmp/proj" && printf "n\n" | bash "$SCRIPT" >/dev/null 2>&1)
+  (cd "$tmp/proj" && printf "n\n" | bash "$SCRIPT" "$tmp/proj" >/dev/null 2>&1)
 
   if [[ -s "$GH_REPO_CREATE_LOG" ]]; then
     fail "expected declining '.' to not create repo"
@@ -490,7 +495,7 @@ test_connect_remote_flow() {
   export GH_REPO_LIST_OUT="myuser/example"
   export GIT_REMOTE_REFS_OUT="origin/main"
 
-  set_fzf_queue "$tmp/fzf.queue" "$tmp/project" "personal" "myuser/example" "SSH" "origin/main" "status|Mostrar status"
+  set_fzf_queue "$tmp/fzf.queue" "." "$tmp/project" "personal" "myuser/example" "SSH" "origin/main" "status|Mostrar status"
 
   (cd "$tmp" && bash "$SCRIPT" --connect-remote >/dev/null 2>&1)
 
@@ -498,6 +503,74 @@ test_connect_remote_flow() {
   grep -q -- "remote add origin" "$git_log" || fail "expected git remote add origin"
   grep -q -- "fetch --prune origin" "$git_log" || fail "expected git fetch"
   grep -q -- "status -sb" "$git_log" || fail "expected git status to be called"
+}
+
+test_connect_remote_existing_git_without_origin_prompts() {
+  local tmp
+  local git_log
+  local output
+  tmp=$(with_temp_dir)
+
+  mkdir -p "$tmp/project/.git"
+  make_stub_bin
+
+  git_log="$tmp/git.log"
+  export GIT_LOG="$git_log"
+  export GH_REPO_LIST_OUT="myuser/example"
+  export GIT_REMOTE_REFS_OUT="origin/main"
+  export GIT_REMOTE_EXISTS=0
+
+  set_fzf_queue "$tmp/fzf.queue" "$tmp/project" "personal" "myuser/example" "SSH" "origin/main" "status|Mostrar status"
+
+  output=$(cd "$tmp" && bash "$SCRIPT" --connect-remote "$tmp" <<<"y" 2>&1 || true)
+
+  echo "$output" | grep -q -- "no tiene 'origin'" || fail "expected git repo warning"
+  grep -q -- "remote add origin" "$git_log" || fail "expected git remote add origin"
+}
+
+test_connect_remote_existing_git_with_origin_repompts() {
+  local tmp
+  local git_log
+  local output
+  tmp=$(with_temp_dir)
+
+  mkdir -p "$tmp/project/.git"
+  mkdir -p "$tmp/alt/.git"
+  make_stub_bin
+
+  git_log="$tmp/git.log"
+  export GIT_LOG="$git_log"
+  export GH_REPO_LIST_OUT="myuser/example"
+  export GIT_REMOTE_REFS_OUT="origin/main"
+  export GIT_REMOTE_EXISTS=1
+
+  set_fzf_queue "$tmp/fzf.queue" "$tmp/project" ".." "$tmp/alt" "personal" "myuser/example" "SSH" "origin/main" "status|Mostrar status"
+
+  output=$(cd "$tmp" && bash "$SCRIPT" --connect-remote "$tmp" 2>&1 || true)
+
+  echo "$output" | grep -q -- "ya tiene 'origin'" || fail "expected origin warning"
+  grep -q -- "-C $tmp/alt" "$git_log" || fail "expected selection after reprompt"
+}
+
+
+test_connect_remote_uses_root_arg() {
+  local tmp
+  local git_log
+  tmp=$(with_temp_dir)
+
+  mkdir -p "$tmp/project"
+  make_stub_bin
+
+  git_log="$tmp/git.log"
+  export GIT_LOG="$git_log"
+  export GH_REPO_LIST_OUT="myuser/example"
+  export GIT_REMOTE_REFS_OUT="origin/main"
+
+  set_fzf_queue "$tmp/fzf.queue" "$tmp/project" "personal" "myuser/example" "SSH" "origin/main" "status|Mostrar status"
+
+  (cd "$tmp" && bash "$SCRIPT" --connect-remote "$tmp" >/dev/null 2>&1)
+
+  grep -q -- "-C $tmp/project" "$git_log" || fail "expected git to run in root arg"
 }
 
 run() {
@@ -515,6 +588,9 @@ run() {
     test_help_flag_prints_usage
     test_selecting_dot_requires_confirmation
     test_connect_remote_flow
+    test_connect_remote_uses_root_arg
+    test_connect_remote_existing_git_without_origin_prompts
+    test_connect_remote_existing_git_with_origin_repompts
   )
 
   local -a selected

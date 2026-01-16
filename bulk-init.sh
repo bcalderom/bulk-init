@@ -6,6 +6,9 @@ set -euo pipefail
 
 log_info() { echo -e "\e[32m[INFO]\e[0m $1"; }
 log_error() { echo -e "\e[31m[ERROR]\e[0m $1" >&2; }
+
+DEFAULT_ROOT_DIR="${DEFAULT_ROOT_DIR:-}"
+
 require_command() {
   if ! command -v "$1" &> /dev/null; then
     MISSING_TOOLS+=("$1")
@@ -44,6 +47,161 @@ join_by() {
   echo "$*"
 }
 
+parse_args() {
+  MODE="default"
+  ROOT_ARG=""
+
+  local arg
+  local parsing_flags=1
+
+  for arg in "$@"; do
+    if (( parsing_flags == 0 )); then
+      if [[ -n "${ROOT_ARG:-}" ]]; then
+        log_error "Argumento extra inesperado: $arg"
+        exit 1
+      fi
+      ROOT_ARG="$arg"
+      continue
+    fi
+
+    case "$arg" in
+      -h|--help)
+        MODE="help"
+        ;;
+      --logout)
+        MODE="logout"
+        ;;
+      --add-ssh-key)
+        MODE="add_ssh_key"
+        ;;
+      --connect-remote)
+        MODE="connect_remote"
+        ;;
+      --)
+        parsing_flags=0
+        ;;
+      -* )
+        log_error "Opción desconocida: $arg"
+        exit 1
+        ;;
+      *)
+        if [[ -n "${ROOT_ARG:-}" ]]; then
+          log_error "Argumento extra inesperado: $arg"
+          exit 1
+        fi
+        ROOT_ARG="$arg"
+        ;;
+    esac
+  done
+}
+
+mode_needs_root() {
+  case "${MODE:-default}" in
+    default|connect_remote)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+normalize_dir_or_fail() {
+  local dir
+  dir="$1"
+
+  if [[ -z "${dir:-}" ]]; then
+    log_error "Directorio vacío."
+    return 1
+  fi
+
+  if [[ ! -d "$dir" ]]; then
+    log_error "No es un directorio: $dir"
+    return 1
+  fi
+
+  if [[ ! -r "$dir" || ! -x "$dir" ]]; then
+    log_error "Sin permisos para acceder a: $dir"
+    return 1
+  fi
+
+  (cd "$dir" && pwd)
+}
+
+list_root_dirs() {
+  local base
+  base="$1"
+
+  find "$base" -maxdepth 2 -name ".git" -prune -o -type d -print 2>/dev/null | while read -r dir; do
+    if [[ "$dir" == "$base" ]]; then
+      continue
+    fi
+    echo "$dir"
+  done
+}
+
+select_dir_with_parent() {
+  local prompt
+  local base
+  local list_fn
+  local selected
+
+  prompt="$1"
+  base="$2"
+  list_fn="$3"
+
+  while true; do
+    selected=$(
+      {
+        printf ".\n..\n"
+        "$list_fn" "$base"
+      } | fzf --prompt="$prompt"
+    ) || true
+
+    if [[ -z "${selected:-}" ]]; then
+      return 1
+    fi
+
+    case "$selected" in
+      ".")
+        normalize_dir_or_fail "$base"
+        return 0
+        ;;
+      "..")
+        base=$(cd "$base/.." && pwd)
+        continue
+        ;;
+      *)
+        normalize_dir_or_fail "$selected"
+        return 0
+        ;;
+    esac
+  done
+}
+
+fzf_select_root_dir() {
+  select_dir_with_parent "Selecciona raíz de trabajo: " "$PWD" "list_root_dirs"
+}
+
+resolve_root_dir() {
+  if [[ -n "${ROOT_ARG:-}" ]]; then
+    normalize_dir_or_fail "$ROOT_ARG"
+    return 0
+  fi
+
+  if [[ -n "${DEFAULT_ROOT_DIR:-}" ]]; then
+    normalize_dir_or_fail "$DEFAULT_ROOT_DIR"
+    return 0
+  fi
+
+  if mode_needs_root; then
+    fzf_select_root_dir
+    return $?
+  fi
+
+  echo ""
+}
+
 fzf_pick() {
   local prompt
   local items
@@ -75,13 +233,38 @@ confirm_or_abort() {
 }
 
 select_local_non_git_dir() {
-  local selected
-  selected=$(find_non_git_dirs | fzf --prompt="Selecciona un directorio local (sin .git): ") || true
-  if [[ -z "${selected:-}" ]]; then
-    return 1
-  fi
+  select_dir_with_parent "Selecciona un directorio local (sin .git): " "$PWD" "list_non_git_dirs"
+}
 
-  echo "$selected"
+select_local_dir_for_connect_remote() {
+  local base_dir
+  local selected
+  local origin_url
+
+  base_dir="$PWD"
+
+  while true; do
+    selected=$(select_dir_with_parent "Selecciona un directorio para conectar: " "$base_dir" "list_root_dirs") || return 1
+
+    if dir_is_git_repo "$selected"; then
+      if dir_has_origin_remote "$selected"; then
+        origin_url=$(git -C "$selected" remote get-url origin 2>/dev/null || true)
+        log_info "Ese directorio ya tiene 'origin' configurado: ${origin_url:-}" >&2
+        log_info "Selecciona otro (usa '..' para subir)." >&2
+        base_dir="$selected"
+        continue
+      fi
+
+      log_info "Ese directorio ya es un repositorio Git, pero no tiene 'origin'." >&2
+      if ! confirm_or_abort "¿Conectar este repo existente a GitHub? [y/N]: "; then
+        base_dir="$selected"
+        continue
+      fi
+    fi
+
+    echo "$selected"
+    return 0
+  done
 }
 
 select_remote_url_type() {
@@ -171,11 +354,25 @@ get_remote_url_for_repo() {
   esac
 }
 
+dir_is_git_repo() {
+  local dir
+  dir="$1"
+
+  [[ -d "$dir/.git" ]]
+}
+
+dir_has_origin_remote() {
+  local dir
+  dir="$1"
+
+  git -C "$dir" remote get-url origin >/dev/null 2>&1
+}
+
 ensure_not_git_repo() {
   local dir
   dir="$1"
 
-  if [[ -d "$dir/.git" ]]; then
+  if dir_is_git_repo "$dir"; then
     log_error "El directorio ya es un repositorio Git: $dir"
     return 1
   fi
@@ -187,7 +384,7 @@ ensure_dir_confirmation_if_dot() {
   local dir
   dir="$1"
 
-  if [[ "$dir" == "." ]]; then
+  if [[ "$dir" == "$PWD" ]]; then
     if ! confirm_or_abort "Vas a conectar el repo en el directorio actual ($PWD). ¿Continuar? [y/N]: "; then
       return 1
     fi
@@ -532,9 +729,13 @@ connect_remote_flow() {
   local remote_branch
   local state
 
-  dir=$(select_local_non_git_dir) || return 0
+  dir=$(select_local_dir_for_connect_remote) || return 0
   ensure_dir_confirmation_if_dot "$dir" || return 0
-  ensure_not_git_repo "$dir" || return 1
+  if dir_is_git_repo "$dir" && ! dir_has_origin_remote "$dir"; then
+    log_info "Usando repositorio existente sin 'origin'."
+  else
+    ensure_not_git_repo "$dir" || return 1
+  fi
 
   repo=$(select_github_repo) || return 0
   url_type=$(select_remote_url_type) || return 0
@@ -750,6 +951,19 @@ find_non_git_dirs() {
   done
 }
 
+list_non_git_dirs() {
+  local base
+  base="$1"
+
+  find "$base" -type d -name ".git" -prune -o -type d -print 2>/dev/null | while read -r dir; do
+    [[ -d "$dir/.git" ]] && continue
+    if [[ "$dir" == "$base" ]]; then
+      continue
+    fi
+    echo "$dir"
+  done
+}
+
 select_repo_owner() {
   local user_login
   local choice
@@ -808,108 +1022,125 @@ select_ssh_public_key() {
 # =========[ INICIO DEL SCRIPT ]==========
 
 main() {
-  if (( $# > 0 )) && { [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "--help" ]]; }; then
-    print_help
+  parse_args "$@"
+
+  local root_dir
+  root_dir=$(resolve_root_dir)
+  if [[ $? -ne 0 ]]; then
+    log_info "No se seleccionó ningún directorio. Saliendo."
     return 0
   fi
 
-  if (( $# > 0 )) && [[ "${1:-}" == "--logout" ]]; then
-    check_dependencies gh
+  if mode_needs_root; then
+    cd "$root_dir"
+  fi
 
-    if gh_logout_supports_yes; then
-      gh auth logout --hostname "${GH_HOST:-github.com}" --yes
+  case "${MODE:-default}" in
+    help)
+      print_help
+      return 0
+      ;;
+    logout)
+      check_dependencies gh
+
+      if gh_logout_supports_yes; then
+        gh auth logout --hostname "${GH_HOST:-github.com}" --yes
+        log_info "Sesión de GitHub CLI cerrada correctamente."
+        return 0
+      fi
+
+      log_info "Tu versión de GitHub CLI no soporta '--yes' en 'gh auth logout'."
+      log_info "Recomendamos actualizar GitHub CLI para evitar prompts interactivos."
+
+      if [[ -n "${BULK_INIT_NO_PROMPT:-}" ]] || ! is_interactive; then
+        log_error "No se puede cerrar sesión sin interacción en esta versión de GitHub CLI."
+        exit 1
+      fi
+
+      gh auth logout --hostname "${GH_HOST:-github.com}"
       log_info "Sesión de GitHub CLI cerrada correctamente."
       return 0
-    fi
+      ;;
+    add_ssh_key)
+      check_dependencies fzf gh
 
-    log_info "Tu versión de GitHub CLI no soporta '--yes' en 'gh auth logout'."
-    log_info "Recomendamos actualizar GitHub CLI para evitar prompts interactivos."
+      require_gh_auth
 
-    if [[ -n "${BULK_INIT_NO_PROMPT:-}" ]] || ! is_interactive; then
-      log_error "No se puede cerrar sesión sin interacción en esta versión de GitHub CLI."
-      exit 1
-    fi
+      KEY_FILE=$(select_ssh_public_key)
+      KEY_TITLE="$(basename "$KEY_FILE")@$(hostname 2>/dev/null || echo local)"
 
-    gh auth logout --hostname "${GH_HOST:-github.com}"
-    log_info "Sesión de GitHub CLI cerrada correctamente."
-    return 0
-  fi
-
-  if (( $# > 0 )) && [[ "${1:-}" == "--add-ssh-key" ]]; then
-    check_dependencies fzf gh
-
-    require_gh_auth
-
-    KEY_FILE=$(select_ssh_public_key)
-    KEY_TITLE="$(basename "$KEY_FILE")@$(hostname 2>/dev/null || echo local)"
-
-    gh ssh-key add "$KEY_FILE" --title "$KEY_TITLE"
-    log_info "Llave SSH agregada correctamente a tu cuenta de GitHub."
-    return 0
-  fi
-
-  if (( $# > 0 )) && [[ "${1:-}" == "--connect-remote" ]]; then
-    check_dependencies git fzf gh
-
-    require_gh_auth
-    connect_remote_flow
-    return 0
-  fi
-
-  check_dependencies git fzf gh
-
-  require_gh_auth
-
-  while true; do
-    log_info "Buscando directorios disponibles (excluyendo repositorios Git)..."
-    TARGET_DIR=$(find_non_git_dirs | fzf --prompt="Selecciona un directorio: ") || true
-
-    if [[ -z "${TARGET_DIR:-}" ]]; then
-      log_info "No se seleccionó ningún directorio. Saliendo."
+      gh ssh-key add "$KEY_FILE" --title "$KEY_TITLE"
+      log_info "Llave SSH agregada correctamente a tu cuenta de GitHub."
       return 0
-    fi
+      ;;
+    connect_remote)
+      check_dependencies git fzf gh
 
-    if [[ "$TARGET_DIR" == "." ]]; then
-      read -r -p "Vas a inicializar y publicar el repositorio en el directorio actual ($PWD). ¿Continuar? [y/N]: " CONFIRM
-      if [[ "${CONFIRM:-}" != "y" && "${CONFIRM:-}" != "Y" ]]; then
-        log_error "Abortado por el usuario."
-        continue
-      fi
-    fi
+      require_gh_auth
+      connect_remote_flow
+      return 0
+      ;;
+    default)
+      check_dependencies git fzf gh
 
-    if [[ "$TARGET_DIR" == "." ]]; then
-      REPO_NAME=$(basename "$PWD")
-    else
-      REPO_NAME=$(basename "$TARGET_DIR")
-    fi
+      require_gh_auth
 
-    OWNER=$(select_repo_owner) || true
-    if [[ -z "${OWNER:-}" ]]; then
-      log_error "No se seleccionó ningún owner. Abortando."
-      continue
-    fi
+      while true; do
+        log_info "Buscando directorios disponibles (excluyendo repositorios Git)..."
+        TARGET_DIR=$(select_local_non_git_dir) || true
 
-    log_info "Inicializando repositorio Git en: $TARGET_DIR"
-    git -C "$TARGET_DIR" init
+        if [[ -z "${TARGET_DIR:-}" ]]; then
+          log_info "No se seleccionó ningún directorio. Saliendo."
+          return 0
+        fi
 
-    log_info "Creando repositorio en GitHub: $REPO_NAME"
-    gh repo create "$OWNER/$REPO_NAME" --source="$TARGET_DIR" --private --remote=origin
+        if [[ "$TARGET_DIR" == "$PWD" ]]; then
+          read -r -p "Vas a inicializar y publicar el repositorio en el directorio actual ($PWD). ¿Continuar? [y/N]: " CONFIRM
+          if [[ "${CONFIRM:-}" != "y" && "${CONFIRM:-}" != "Y" ]]; then
+            log_error "Abortado por el usuario."
+            continue
+          fi
+        fi
 
-    # Verifica si no hay archivos, crea README para commit inicial
-    if [[ -z "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' -print -quit 2>/dev/null)" ]]; then
-      echo "# $REPO_NAME" > "$TARGET_DIR/README.md"
-    fi
+        if [[ "$TARGET_DIR" == "$PWD" ]]; then
+          REPO_NAME=$(basename "$PWD")
+        else
+          REPO_NAME=$(basename "$TARGET_DIR")
+        fi
 
-    log_info "Realizando commit inicial..."
-    git -C "$TARGET_DIR" add .
-    git -C "$TARGET_DIR" commit -m "Initial commit"
+        OWNER=$(select_repo_owner) || true
+        if [[ -z "${OWNER:-}" ]]; then
+          log_error "No se seleccionó ningún owner. Abortando."
+          continue
+        fi
 
-    log_info "Haciendo push a 'main'..."
-    git -C "$TARGET_DIR" branch -M main
-    git -C "$TARGET_DIR" push -u origin main
+        log_info "Inicializando repositorio Git en: $TARGET_DIR"
+        git -C "$TARGET_DIR" init
 
-    log_info "Repositorio creado y publicado correctamente."
-  done
+        log_info "Creando repositorio en GitHub: $REPO_NAME"
+        gh repo create "$OWNER/$REPO_NAME" --source="$TARGET_DIR" --private --remote=origin
+
+        # Verifica si no hay archivos, crea README para commit inicial
+        if [[ -z "$(find "$TARGET_DIR" -mindepth 1 -maxdepth 1 ! -name '.git' -print -quit 2>/dev/null)" ]]; then
+          echo "# $REPO_NAME" > "$TARGET_DIR/README.md"
+        fi
+
+        log_info "Realizando commit inicial..."
+        git -C "$TARGET_DIR" add .
+        git -C "$TARGET_DIR" commit -m "Initial commit"
+
+        log_info "Haciendo push a 'main'..."
+        git -C "$TARGET_DIR" branch -M main
+        git -C "$TARGET_DIR" push -u origin main
+
+        log_info "Repositorio creado y publicado correctamente."
+      done
+      ;;
+    *)
+      log_error "Modo desconocido: ${MODE:-}"
+      exit 1
+      ;;
+  esac
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

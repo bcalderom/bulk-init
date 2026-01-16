@@ -15,7 +15,7 @@ Este proyecto es un script Bash. En Windows se ejecuta vía Git Bash (Git for Wi
 
 ## Uso
 
-Ejecuta el script desde el directorio raíz donde querés buscar carpetas para inicializar.
+Ejecuta el script desde el directorio raíz donde querés buscar carpetas para inicializar. También podés pasar un directorio como argumento para fijar la raíz de trabajo.
 
 ### Linux/macOS
 

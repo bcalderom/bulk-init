@@ -8,6 +8,8 @@
 - Flag `--connect-remote` para conectar un directorio local con un repo remoto existente.
 - Selector interactivo de repo remoto (GitHub CLI) y tipo de URL (SSH/HTTPS).
 - Menú de acciones (pull/rebase/reset/push) según el estado local/remoto.
+- Resolución de raíz con prioridad: argumento, valor por defecto, FZF (profundidad 2).
+- Aviso y confirmación al seleccionar repos ya inicializados al conectar remote.
 - Tests para el flujo `--connect-remote` con stubs de `git`/`gh`.
 - Flag `-h`/`--help` para mostrar ayuda de uso.
 - Soporte de instalación en Windows (Git Bash): sugerencias de instalación con `winget` y alternativas (`choco`, `scoop`).
