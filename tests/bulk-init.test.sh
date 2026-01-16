@@ -187,7 +187,7 @@ fi
 if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
   json_arg=""
   for arg in "$@"; do
-    if [[ "$arg" == "sshUrl" || "$arg" == "httpsUrl" || "$arg" == "defaultBranchRef" ]]; then
+    if [[ "$arg" == "sshUrl" || "$arg" == "httpsUrl" || "$arg" == "defaultBranchRef" || "$arg" == "url" ]]; then
       json_arg="$arg"
     fi
   done
@@ -198,7 +198,14 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
       exit 0
       ;;
     httpsUrl)
+      if [[ "${GH_VIEW_NO_HTTPS_URL:-}" == "1" ]]; then
+        exit 1
+      fi
       echo "https://github.com/myuser/example.git"
+      exit 0
+      ;;
+    url)
+      echo "https://github.com/myuser/example"
       exit 0
       ;;
     defaultBranchRef)
@@ -494,6 +501,7 @@ test_connect_remote_flow() {
   export GIT_LOG="$git_log"
   export GH_REPO_LIST_OUT="myuser/example"
   export GIT_REMOTE_REFS_OUT="origin/main"
+  export GIT_REMOTE_EXISTS=0
 
   set_fzf_queue "$tmp/fzf.queue" "." "$tmp/project" "personal" "myuser/example" "SSH" "origin/main" "status|Mostrar status"
 
@@ -552,6 +560,30 @@ test_connect_remote_existing_git_with_origin_repompts() {
   grep -q -- "-C $tmp/alt" "$git_log" || fail "expected selection after reprompt"
 }
 
+test_connect_remote_https_fallback_uses_url_field() {
+  local tmp
+  local git_log
+  local output
+  tmp=$(with_temp_dir)
+
+  mkdir -p "$tmp/project"
+  make_stub_bin
+
+  git_log="$tmp/git.log"
+  export GIT_LOG="$git_log"
+  export GH_REPO_LIST_OUT="myuser/example"
+  export GIT_REMOTE_REFS_OUT="origin/main"
+  export GH_VIEW_NO_HTTPS_URL=1
+  export GIT_REMOTE_EXISTS=0
+
+  set_fzf_queue "$tmp/fzf.queue" "$tmp/project" "personal" "myuser/example" "HTTPS" "origin/main" "status|Mostrar status"
+
+  output=$(cd "$tmp" && bash "$SCRIPT" --connect-remote "$tmp" 2>&1 || true)
+
+  echo "$output" | grep -q -- "No se pudo resolver la URL" && fail "expected https fallback to succeed"
+  grep -q -- "remote add origin https://github.com/myuser/example" "$git_log" || fail "expected https url fallback"
+}
+
 
 test_connect_remote_uses_root_arg() {
   local tmp
@@ -565,6 +597,7 @@ test_connect_remote_uses_root_arg() {
   export GIT_LOG="$git_log"
   export GH_REPO_LIST_OUT="myuser/example"
   export GIT_REMOTE_REFS_OUT="origin/main"
+  export GIT_REMOTE_EXISTS=0
 
   set_fzf_queue "$tmp/fzf.queue" "$tmp/project" "personal" "myuser/example" "SSH" "origin/main" "status|Mostrar status"
 
@@ -591,6 +624,7 @@ run() {
     test_connect_remote_uses_root_arg
     test_connect_remote_existing_git_without_origin_prompts
     test_connect_remote_existing_git_with_origin_repompts
+    test_connect_remote_https_fallback_uses_url_field
   )
 
   local -a selected

@@ -334,9 +334,22 @@ select_github_repo() {
   echo "$repo"
 }
 
+normalize_https_url() {
+  local url
+  url="$1"
+
+  if [[ "$url" == git@github.com:* ]]; then
+    echo "https://github.com/${url#git@github.com:}"
+    return 0
+  fi
+
+  echo "$url"
+}
+
 get_remote_url_for_repo() {
   local repo
   local url_type
+  local url
 
   repo="$1"
   url_type="$2"
@@ -346,7 +359,13 @@ get_remote_url_for_repo() {
       gh repo view "$repo" --json sshUrl --jq .sshUrl
       ;;
     HTTPS)
-      gh repo view "$repo" --json httpsUrl --jq .httpsUrl
+      if url=$(gh repo view "$repo" --json httpsUrl --jq .httpsUrl 2>/dev/null); then
+        echo "$url"
+        return 0
+      fi
+
+      url=$(gh repo view "$repo" --json url --jq .url 2>/dev/null) || return 1
+      normalize_https_url "$url"
       ;;
     *)
       return 1
