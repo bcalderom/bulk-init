@@ -47,6 +47,12 @@ Para agregar una llave SSH existente a tu cuenta de GitHub (seleccionando un arc
 bash bulk-init.sh --add-ssh-key
 ```
 
+Para conectar un directorio local a un repositorio GitHub ya existente (elige directorio, repo remoto y tipo de URL con `fzf`):
+
+```bash
+bash bulk-init.sh --connect-remote
+```
+
 Para ver la ayuda:
 
 ```bash

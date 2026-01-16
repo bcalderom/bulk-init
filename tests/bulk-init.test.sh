@@ -38,6 +38,77 @@ EOF
   cat > "$STUB_BIN/git" <<'EOF'
 #!/bin/bash
 set -euo pipefail
+
+log_file="${GIT_LOG:-}"
+
+if [[ -n "$log_file" ]]; then
+  printf '%s ' "$@" >> "$log_file"
+  echo >> "$log_file"
+fi
+
+case "${1:-}" in
+  -C)
+    shift 2
+    ;;
+ esac
+
+case "${1:-}" in
+  init|fetch|switch|pull|push|reset|add|commit|branch)
+    exit 0
+    ;;
+  remote)
+    if [[ "${2:-}" == "add" || "${2:-}" == "remove" ]]; then
+      exit 0
+    fi
+    if [[ "${2:-}" == "get-url" ]]; then
+      if [[ "${GIT_REMOTE_EXISTS:-}" == "1" ]]; then
+        echo "git@github.com:myuser/example.git"
+        exit 0
+      fi
+      exit 1
+    fi
+    exit 0
+    ;;
+  rev-parse)
+    if [[ "${GIT_REV_PARSE_FAIL:-}" == "1" ]]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+  show-ref)
+    if [[ "${GIT_SHOW_REF_FAIL:-}" == "1" ]]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+  merge-base)
+    if [[ "${GIT_MERGE_BASE_FAIL:-}" == "1" ]]; then
+      exit 1
+    fi
+    exit 0
+    ;;
+  for-each-ref)
+    if [[ -n "${GIT_REMOTE_REFS_OUT:-}" ]]; then
+      printf "%s\n" "${GIT_REMOTE_REFS_OUT}"
+    fi
+    exit 0
+    ;;
+  status)
+    if [[ -n "${GIT_STATUS_OUT:-}" ]]; then
+      printf "%s\n" "${GIT_STATUS_OUT}"
+    fi
+    exit 0
+    ;;
+  rev-list)
+    if [[ -n "${GIT_REV_LIST_OUT:-}" ]]; then
+      printf "%s\n" "${GIT_REV_LIST_OUT}"
+    else
+      echo "0 0"
+    fi
+    exit 0
+    ;;
+esac
+
 exit 0
 EOF
   chmod +x "$STUB_BIN/git"
@@ -100,6 +171,37 @@ if [[ "${1:-}" == "api" && "${2:-}" == "user/orgs" ]]; then
     echo '[{"login":"org1"},{"login":"org2"}]'
   fi
   exit 0
+fi
+
+if [[ "${1:-}" == "repo" && "${2:-}" == "list" ]]; then
+  if [[ -n "${GH_REPO_LIST_OUT:-}" ]]; then
+    printf "%s\n" "${GH_REPO_LIST_OUT}"
+  fi
+  exit 0
+fi
+
+if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
+  json_arg=""
+  for arg in "$@"; do
+    if [[ "$arg" == "sshUrl" || "$arg" == "httpsUrl" || "$arg" == "defaultBranchRef" ]]; then
+      json_arg="$arg"
+    fi
+  done
+
+  case "$json_arg" in
+    sshUrl)
+      echo "git@github.com:myuser/example.git"
+      exit 0
+      ;;
+    httpsUrl)
+      echo "https://github.com/myuser/example.git"
+      exit 0
+      ;;
+    defaultBranchRef)
+      echo "main"
+      exit 0
+      ;;
+  esac
 fi
 
 if [[ "${1:-}" == "repo" && "${2:-}" == "create" ]]; then
@@ -375,19 +477,75 @@ test_selecting_dot_requires_confirmation() {
   fi
 }
 
+test_connect_remote_flow() {
+  local tmp
+  local git_log
+  tmp=$(with_temp_dir)
+
+  mkdir -p "$tmp/project"
+  make_stub_bin
+
+  git_log="$tmp/git.log"
+  export GIT_LOG="$git_log"
+  export GH_REPO_LIST_OUT="myuser/example"
+  export GIT_REMOTE_REFS_OUT="origin/main"
+
+  set_fzf_queue "$tmp/fzf.queue" "$tmp/project" "personal" "myuser/example" "SSH" "origin/main" "status|Mostrar status"
+
+  (cd "$tmp" && bash "$SCRIPT" --connect-remote >/dev/null 2>&1)
+
+  grep -q -- "init" "$git_log" || fail "expected git init to be called"
+  grep -q -- "remote add origin" "$git_log" || fail "expected git remote add origin"
+  grep -q -- "fetch --prune origin" "$git_log" || fail "expected git fetch"
+  grep -q -- "status -sb" "$git_log" || fail "expected git status to be called"
+}
+
 run() {
-  test_owner_defaults_to_user_when_no_orgs
-  test_owner_can_be_org
-  test_arch_install_suggests_github_cli
-  test_windows_install_suggests_winget
-  test_windows_pipeline_offers_and_runs_autoinstall
-  test_windows_pipeline_skips_autoinstall_when_no_prompt
-  test_logout_flag_calls_gh_auth_logout
-  test_logout_flag_uses_yes_when_supported
-  test_add_ssh_key_flag_calls_gh_ssh_key_add
-  test_help_flag_prints_usage
-  test_selecting_dot_requires_confirmation
+  local -a tests
+  tests=(
+    test_owner_defaults_to_user_when_no_orgs
+    test_owner_can_be_org
+    test_arch_install_suggests_github_cli
+    test_windows_install_suggests_winget
+    test_windows_pipeline_offers_and_runs_autoinstall
+    test_windows_pipeline_skips_autoinstall_when_no_prompt
+    test_logout_flag_calls_gh_auth_logout
+    test_logout_flag_uses_yes_when_supported
+    test_add_ssh_key_flag_calls_gh_ssh_key_add
+    test_help_flag_prints_usage
+    test_selecting_dot_requires_confirmation
+    test_connect_remote_flow
+  )
+
+  local -a selected
+  selected=()
+
+  # Usage:
+  #   bash tests/bulk-init.test.sh                 # all
+  #   bash tests/bulk-init.test.sh test_name       # one
+  #   TEST=test_name bash tests/bulk-init.test.sh  # one (env)
+  #   bash tests/bulk-init.test.sh test_connect_remote_flow
+  if (( $# > 0 )); then
+    selected=("$@")
+  elif [[ -n "${TEST:-}" ]]; then
+    selected=("$TEST")
+  else
+    selected=("${tests[@]}")
+  fi
+
+  local test_name
+  for test_name in "${selected[@]}"; do
+    if ! declare -F "$test_name" >/dev/null; then
+      echo "Unknown test: $test_name" >&2
+      echo "Available tests:" >&2
+      printf '  %s\n' "${tests[@]}" >&2
+      exit 2
+    fi
+
+    "$test_name"
+  done
+
   echo "OK"
 }
 
-run
+run "$@"

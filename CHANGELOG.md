@@ -5,6 +5,10 @@
 - Tests bash para validar la selección de owner y el llamado a `gh repo create`.
 - Flag `--logout` para cerrar sesión de GitHub CLI.
 - Flag `--add-ssh-key` para subir una llave SSH pública existente a GitHub.
+- Flag `--connect-remote` para conectar un directorio local con un repo remoto existente.
+- Selector interactivo de repo remoto (GitHub CLI) y tipo de URL (SSH/HTTPS).
+- Menú de acciones (pull/rebase/reset/push) según el estado local/remoto.
+- Tests para el flujo `--connect-remote` con stubs de `git`/`gh`.
 - Flag `-h`/`--help` para mostrar ayuda de uso.
 - Soporte de instalación en Windows (Git Bash): sugerencias de instalación con `winget` y alternativas (`choco`, `scoop`).
 - Instalación opcional automática en Windows: abre `cmd.exe` como admin y ejecuta `winget`.
